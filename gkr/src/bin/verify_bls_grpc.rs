@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{transport::{Server, Channel}, Request, Response, Status};
 
 use circuit::Circuit;
 use gkr_engine::{
@@ -35,7 +35,8 @@ struct VerificationParams {
 
 #[derive(Default)]
 pub struct SharedState {
-    pub data: Option<VerificationDataMsg>,
+    pub data: Option<Vec<u8>>, // Changed to store raw bytes
+    pub circuit: Option<Circuit<<BLSConfig as GKREngine>::FieldConfig>>,
 }
 
 #[derive(Default)]
@@ -50,7 +51,10 @@ impl Verification for VerificationService {
         request: Request<VerificationDataMsg>,
     ) -> Result<Response<VerificationResponse>, Status> {
         let mut state = self.state.lock().await;
-        state.data = Some(request.into_inner());
+        let msg = request.into_inner();
+        
+        state.data = Some(msg.proof_bytes);
+        
         Ok(Response::new(VerificationResponse {
             success: true,
             message: "Data received".to_string(),
@@ -62,16 +66,8 @@ impl Verification for VerificationService {
         request: Request<VerificationRequest>,
     ) -> Result<Response<VerificationResponse>, Status> {
         let circuit_path = &request.get_ref().circuit_path;
-        let state = self.state.lock().await;
+        let mut state = self.state.lock().await;
         
-        let data = match &state.data {
-            Some(d) => d,
-            None => return Ok(Response::new(VerificationResponse {
-                success: false,
-                message: "No verification data available".to_string(),
-            })),
-        };
-
         // Initialize MPI with size 8
         let mpi_config = MPIConfig::verifier_new(8);
         let verifier = Verifier::<BLSConfig>::new(mpi_config);
@@ -79,10 +75,11 @@ impl Verification for VerificationService {
         println!("Loading circuit file");
         let mut circuit = Circuit::<<BLSConfig as GKREngine>::FieldConfig>::verifier_load_circuit::<BLSConfig>(circuit_path);
 
-        let (proof, claimed_v) = load_proof_and_claimed_v::<
-            <<BLSConfig as GKREngine>::FieldConfig as FieldEngine>::ChallengeField
-        >(&data.proof_bytes)
-            .map_err(|e| Status::internal(format!("Failed to deserialize proof: {}", e)))?;
+        println!("Loading witness file");
+        circuit.verifier_load_witness_file(
+            "/home/user/ExpanderCompilerCollection/efc/witnesses/290001/blsverifier/witness_0.txt",
+            &verifier.mpi_config,
+        );
 
         // Get verification parameters from global state
         let params = unsafe {
@@ -94,10 +91,10 @@ impl Verification for VerificationService {
         let result = verifier.verify(
             &mut circuit,
             &params.public_input,
-            &claimed_v,
+            &[],  // Empty claimed_v since we're using witness file
             &params.pcs_params,
             &params.pcs_verification_key,
-            &proof,
+            &[],  // Empty proof since we're using witness file
         );
 
         Ok(Response::new(VerificationResponse {
@@ -114,10 +111,14 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     };
 
     println!("Starting gRPC server on {}", addr);
-    Server::builder()
-        .add_service(VerificationServer::new(service))
-        .serve(addr)
-        .await?;
+    let server = Server::builder()
+        .add_service(
+            VerificationServer::new(service)
+                .max_decoding_message_size(100 * 1024 * 1024) // 100MB
+                .max_encoding_message_size(100 * 1024 * 1024)  // 100MB
+        );
+
+    server.serve(addr).await?;
 
     Ok(())
 }
@@ -125,13 +126,19 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 async fn send_verification_data(
     proof_bytes: Vec<u8>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut client = verification::verification_client::VerificationClient::connect("http://[::1]:50051").await?;
+    let channel = Channel::from_static("http://[::1]:50051")
+        .connect()
+        .await?;
+        
+    let mut client = verification::verification_client::VerificationClient::new(channel)
+        .max_decoding_message_size(100 * 1024 * 1024) // 100MB
+        .max_encoding_message_size(100 * 1024 * 1024); // 100MB
 
     let request = Request::new(VerificationDataMsg {
-        public_input: vec![],  // Not needed since we use global state
-        pcs_params: vec![],    // Not needed since we use global state
-        pcs_verification_key: vec![],  // Not needed since we use global state
         proof_bytes,
+        public_input: vec![],    // Not needed since we use global state
+        pcs_params: vec![],      // Not needed since we use global state
+        pcs_verification_key: vec![], // Not needed since we use global state
     });
 
     let response = client.send_verification_data(request).await?;
@@ -147,8 +154,14 @@ fn prepare_verification_data() {
     println!("loading circuit file");
     let mut circuit = Circuit::<<BLSConfig as GKREngine>::FieldConfig>::verifier_load_circuit::<BLSConfig>("/home/user/ExpanderCompilerCollection/efc/circuit_blsverifier.txt");
 
-    println!("loading proof file");
-    let proof_bytes = std::fs::read("./test_bls_proof0").expect("Unable to read proof from file.");
+    println!("loading witness file");
+    circuit.verifier_load_witness_file(
+        "/home/user/ExpanderCompilerCollection/efc/witnesses/290001/blsverifier/witness_0.txt",
+        &verifier.mpi_config,
+    );
+
+    // println!("loading proof file");
+    // let proof_bytes = std::fs::read("./test_bls_proof0_new").expect("Unable to read proof from file.");
     
     // Initialize PCS parameters
     let (pcs_params, _, pcs_verification_key, _) = expander_pcs_init_testing_only::<<BLSConfig as GKREngine>::FieldConfig, <BLSConfig as GKREngine>::PCSConfig>(
@@ -187,12 +200,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Wait a bit for server to start
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     
-    // First send the verification data
-    let proof_bytes = std::fs::read("./test_bls_proof0").expect("Unable to read proof from file.");
-    send_verification_data(proof_bytes).await?;
+    // Then download and verify directly without sending data through gRPC
+    let mut client = verification::verification_client::VerificationClient::new(
+        Channel::from_static("http://[::1]:50051")
+            .connect()
+            .await?
+    ).max_decoding_message_size(100 * 1024 * 1024)
+      .max_encoding_message_size(100 * 1024 * 1024);
 
-    // Then download and verify
-    let mut client = verification::verification_client::VerificationClient::connect("http://[::1]:50051").await?;
     let verify_request = Request::new(VerificationRequest {
         circuit_path: "/home/user/ExpanderCompilerCollection/efc/circuit_blsverifier.txt".into(),
     });
