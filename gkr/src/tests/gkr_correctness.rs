@@ -22,6 +22,7 @@ use rand::Rng;
 use serdes::ExpSerde;
 use sha2::Digest;
 use transcript::{BytesHashTranscript, FieldHashTranscript};
+use crate::executor::load_proof_and_claimed_v;
 
 use crate::{utils::*, Prover, Verifier};
 
@@ -328,4 +329,84 @@ fn test_gkr_correctness_helper<Cfg: GKREngine>(write_proof_to: Option<&str>) {
 
     circuit.discard_control_of_shared_mem();
     mpi_config.free_shared_mem(&mut window);
+}
+
+pub fn bls_prove_and_verify<Cfg: GKREngine>() {
+    let mpi_config = MPIConfig::verifier_new(8);
+    root_println!(mpi_config, "============== start ===============");
+    root_println!(
+        mpi_config,
+        "Field Type: {:?}",
+        <Cfg::FieldConfig as FieldEngine>::FIELD_TYPE
+    );
+    root_println!(mpi_config, "Config created.");
+    let circuit_path = "/home/user/ExpanderCompilerCollection/efc/circuit_blsverifier.txt";
+    let mut circuit =
+        Circuit::<Cfg::FieldConfig>::verifier_load_circuit::<Cfg>(&circuit_path);
+    root_println!(mpi_config, "Circuit loaded.");
+    let witness_path = "/home/user/ExpanderCompilerCollection/efc/witnesses/290001/blsverifier/witness_0.txt";
+    circuit.load_witness_allow_padding_testing_only(&witness_path, &mpi_config);
+    root_println!(mpi_config, "Witness loaded.");
+    let (pcs_params, pcs_proving_key, pcs_verification_key, mut pcs_scratch) =
+        expander_pcs_init_testing_only::<Cfg::FieldConfig, Cfg::PCSConfig>(
+            circuit.log_input_size(),
+            &mpi_config,
+        );
+    let input_proof_file = "/home/user/ExpanderCompilerCollection/efc/test_bls_proof0";
+    let bytes = fs::read(&input_proof_file).expect("Unable to read proof from file.");
+    let (proof, claimed_v) = load_proof_and_claimed_v::<
+        <Cfg::FieldConfig as FieldEngine>::ChallengeField,
+    >(&bytes)
+    .expect("Unable to deserialize proof.");
+
+    root_println!(
+        mpi_config,
+        "Proof generated. Size: {} bytes",
+        proof.bytes.len()
+    );
+    root_println!(mpi_config,);
+
+    root_println!(mpi_config, "Proof hash: ");
+    sha2::Sha256::digest(&proof.bytes)
+        .iter()
+        .for_each(|b| print!("{} ", b));
+    root_println!(mpi_config,);
+
+    let mut public_input_gathered = if mpi_config.is_root() {
+        vec![<Cfg::FieldConfig as FieldEngine>::SimdCircuitField::ZERO; circuit.public_input.len() * mpi_config.world_size()]
+    } else {
+        vec![]
+    };
+    mpi_config.gather_vec(&circuit.public_input, &mut public_input_gathered);
+    let verifier = Verifier::<Cfg>::new(mpi_config.clone());
+    println!("Verifier created.");
+    let verification_start = Instant::now();
+    assert!(verifier.verify(
+        &mut circuit,
+        &public_input_gathered,
+        &claimed_v,
+        &pcs_params,
+        &pcs_verification_key,
+        &proof
+    ));
+    println!(
+        "Verification time: {} μs",
+        verification_start.elapsed().as_micros()
+    );
+    println!("Correct proof verified.");
+    circuit.discard_control_of_shared_mem();
+}
+
+#[test]
+fn test_bls_end2end() {
+    env_logger::init();
+    declare_gkr_config!(
+        C0,
+        FieldType::M31,
+        FiatShamirHashType::SHA256,
+        PolynomialCommitmentType::Orion,
+        GKRScheme::Vanilla,
+    );
+    bls_prove_and_verify::<C0>();
+    MPIConfig::finalize();
 }
