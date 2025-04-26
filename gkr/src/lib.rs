@@ -13,6 +13,10 @@ pub mod executor;
 pub mod gkr_configs;
 pub use gkr_configs::*;
 
+pub mod verification_proto {
+    tonic::include_proto!("verification");
+}
+
 #[cfg(test)]
 mod tests;
 

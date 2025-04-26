@@ -20,6 +20,11 @@ serdes = { path = "../serdes" }
 sumcheck = { path = "../sumcheck" }
 transcript = { path = "../transcript" }
 utils = { path = "../utils" }
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+tonic = { version = "0.10", features = ["transport"] }
+prost = "0.12"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ark-std.workspace = true
 clap.workspace = true
@@ -35,11 +40,13 @@ thiserror.workspace = true
 
 # for the server
 bytes.workspace = true
-tokio.workspace = true
 warp.workspace = true
 chrono.workspace = true
 tynm.workspace = true
 tiny-keccak.workspace = true
+
+[build-dependencies]
+tonic-build = "0.10"
 
 [dev-dependencies]
 criterion.workspace = true
@@ -67,4 +74,3 @@ profile = [ "utils/profile", "sumcheck/profile" ]
 name = "gkr-hashes"
 harness = false
 path = "benches/gkr_hashes.rs"
-
