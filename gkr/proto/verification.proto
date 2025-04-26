@@ -1,0 +1,23 @@
+syntax = "proto3";
+package verification;
+
+service Verification {
+    rpc SendVerificationData (VerificationDataMsg) returns (VerificationResponse);
+    rpc DownloadAndVerify (VerificationRequest) returns (VerificationResponse);
+}
+
+message VerificationDataMsg {
+    bytes public_input = 1;
+    bytes pcs_params = 2;
+    bytes pcs_verification_key = 3;
+    bytes proof_bytes = 4;
+}
+
+message VerificationRequest {
+    string circuit_path = 1;
+}
+
+message VerificationResponse {
+    bool success = 1;
+    string message = 2;
+}
