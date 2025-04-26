@@ -137,13 +137,6 @@ async fn send_verification_data(
     let response = client.send_verification_data(request).await?;
     println!("Server response: {}", response.get_ref().message);
 
-    let verify_request = Request::new(VerificationRequest {
-        circuit_path: "/home/user/ExpanderCompilerCollection/efc/circuit_blsverifier.txt".into(),
-    });
-
-    let verify_response = client.download_and_verify(verify_request).await?;
-    println!("Verification result: {}", verify_response.get_ref().message);
-
     Ok(())
 }
 
@@ -194,8 +187,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Wait a bit for server to start
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     
+    // First send the verification data
     let proof_bytes = std::fs::read("./test_bls_proof0").expect("Unable to read proof from file.");
     send_verification_data(proof_bytes).await?;
+
+    // Then download and verify
+    let mut client = verification::verification_client::VerificationClient::connect("http://[::1]:50051").await?;
+    let verify_request = Request::new(VerificationRequest {
+        circuit_path: "/home/user/ExpanderCompilerCollection/efc/circuit_blsverifier.txt".into(),
+    });
+    let verify_response = client.download_and_verify(verify_request).await?;
+    println!("Verification result: {}", verify_response.get_ref().message);
     
     server.await??;
     Ok(())

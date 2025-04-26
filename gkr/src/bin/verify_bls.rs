@@ -1,11 +1,16 @@
 use std::{
     fs,
+    io::Cursor,
+    process::exit,
     sync::{Arc, Mutex},
 };
 
+use arith::Field;
 use circuit::Circuit;
+use clap::{Parser, Subcommand};
 use gkr_engine::{
-    BN254Config, ExpanderPCS, FieldEngine, FieldType, GF2ExtConfig, GKREngine, GKRScheme, GoldilocksExtConfig, M31ExtConfig, MPIConfig, MPIEngine, SharedMemory, StructuredReferenceString
+    root_println, BN254Config, BabyBearExtConfig, FieldEngine, FieldType, GF2ExtConfig, GKREngine,
+    GKRScheme, GoldilocksExtConfig, M31ExtConfig, MPIConfig, MPIEngine, SharedMemory,
 };
 use gkr_hashers::{Keccak256hasher, MiMC5FiatShamirHasher, PoseidonFiatShamirHasher, SHA256hasher};
 use log::info;
@@ -25,27 +30,27 @@ fn verify_bls<Cfg: GKREngine + 'static>() {
     let verifier = Verifier::<Cfg>::new(mpi_config);
 
     println!("loading circuit file");
-    let mut circuit = Circuit::<<Cfg>::FieldConfig>::verifier_load_circuit::<Cfg>(
-        "./circuit_blsverifier.txt"
+    let mut circuit = Circuit::<Cfg::FieldConfig>::verifier_load_circuit::<Cfg>(
+        "/home/user/ExpanderCompilerCollection/efc/circuit_blsverifier.txt"
     );
 
     println!("loading witness file");
     circuit.verifier_load_witness_file(
-        "./witnesses/290001/blsverifier/witness_0.txt",
+        "/home/user/ExpanderCompilerCollection/efc/witnesses/290001/blsverifier/witness_0.txt",
         &verifier.mpi_config,
     );
 
     println!("loading proof file");
-    let bytes = fs::read("./test_bls_proof0").expect("Unable to read proof from file.");
+    let bytes = fs::read("./test_bls_proof0_new").expect("Unable to read proof from file.");
     let (proof, claimed_v) = load_proof_and_claimed_v::<
-                <<Cfg>::FieldConfig as FieldEngine>::ChallengeField,
+                <Cfg::FieldConfig as FieldEngine>::ChallengeField,
             >(&bytes)
             .expect("Unable to deserialize proof.");
 
     println!("verifying proof");
 
     // Initialize PCS parameters
-    let (pcs_params, _, pcs_verification_key, _) = expander_pcs_init_testing_only::<<Cfg>::FieldConfig, <Cfg>::PCSConfig>(
+    let (pcs_params, _, pcs_verification_key, _) = expander_pcs_init_testing_only::<Cfg::FieldConfig, Cfg::PCSConfig>(
         circuit.log_input_size(),
         &verifier.mpi_config,
     );
@@ -67,44 +72,6 @@ fn verify_bls<Cfg: GKREngine + 'static>() {
     }
 }
 
-pub struct VerificationData<Cfg: GKREngine + 'static> {
-    public_input: Vec<<Cfg::FieldConfig as FieldEngine>::SimdCircuitField>,
-    pcs_params: <Cfg::PCSConfig as ExpanderPCS<Cfg::FieldConfig>>::Params,
-    pcs_verification_key: <<Cfg::PCSConfig as ExpanderPCS<Cfg::FieldConfig>>::SRS as StructuredReferenceString>::VKey,
-    proof_bytes: Vec<u8>,
-}
-fn prepare_verification_data<Cfg: GKREngine + 'static>() -> VerificationData<Cfg> {
-    // Initialize MPI with size 8
-    let mpi_config = MPIConfig::verifier_new(8);
-    let verifier = Verifier::<Cfg>::new(mpi_config);
-    println!("loading circuit file");
-    let mut circuit = Circuit::<<Cfg>::FieldConfig>::verifier_load_circuit::<Cfg>(
-        "./circuit_blsverifier.txt"
-    );
-
-    println!("loading witness file");
-    circuit.verifier_load_witness_file(
-        "./witnesses/290001/blsverifier/witness_0.txt",
-        &verifier.mpi_config,
-    );
-
-    println!("loading proof file");
-    let proof_bytes = fs::read("./test_bls_proof0").expect("Unable to read proof from file.");
-    // Initialize PCS parameters
-    let (pcs_params, _, pcs_verification_key, _) = expander_pcs_init_testing_only::<<Cfg>::FieldConfig, <Cfg>::PCSConfig>(
-        circuit.log_input_size(),
-        &verifier.mpi_config,
-    );
-    let public_input = circuit.public_input.clone();
-
-    VerificationData {
-        public_input,
-        pcs_params,
-        pcs_verification_key,
-        proof_bytes,
-    }
-}
-
 fn main() {
     // Configure GKR with the specified parameters
     declare_gkr_config!(
@@ -114,6 +81,5 @@ fn main() {
         PolynomialCommitmentType::Orion,
         GKRScheme::Vanilla,
     );
-    let verification_data = prepare_verification_data::<BLSConfig>();
     verify_bls::<BLSConfig>();
 }
