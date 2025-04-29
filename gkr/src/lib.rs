@@ -13,6 +13,9 @@ pub mod executor;
 pub mod gkr_configs;
 pub use gkr_configs::*;
 
+pub mod twine_verifier;
+pub use twine_verifier::*;
+
 pub mod verification_proto {
     tonic::include_proto!("verification");
 }

@@ -11,7 +11,7 @@ use poly_commit::{
 };
 use config_macros::declare_gkr_config;
 use warp::{http::StatusCode, reply, Filter, Rejection, Reply};
-use gkr::{executor::load_proof_and_claimed_v, Verifier};
+use crate::{executor::load_proof_and_claimed_v, Verifier};
 use transcript::BytesHashTranscript;
 use mersenne31::M31x16;
 use tokio::{fs::File, io::AsyncWriteExt};
@@ -220,6 +220,14 @@ async fn start_receiver_server(index: usize) {
         .await;
 }
 
+declare_gkr_config!(
+    BLSConfig,
+    FieldType::M31,
+    FiatShamirHashType::SHA256,
+    PolynomialCommitmentType::Orion,
+    GKRScheme::Vanilla,
+);
+
 #[tokio::main]
 async fn main() {
     let start_time = std::time::Instant::now();
@@ -262,3 +270,4 @@ async fn main() {
     // Exit after all tasks are done
     std::process::exit(0);
 }
+
