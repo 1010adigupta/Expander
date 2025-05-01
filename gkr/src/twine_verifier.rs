@@ -19,7 +19,7 @@ use futures_util::StreamExt;
 use bytes::Buf;
 use tokio_util::io::ReaderStream;
 
-pub fn verify_bls<Cfg: GKREngine + 'static>() {
+pub fn verify_bls<Cfg: GKREngine + 'static>(proof_bytes: Vec<u8>) -> bool {
     // Initialize MPI with size 8
     let mpi_config = MPIConfig::verifier_new(8);
     let verifier = Verifier::<Cfg>::new(mpi_config);
@@ -36,10 +36,10 @@ pub fn verify_bls<Cfg: GKREngine + 'static>() {
     );
 
     println!("loading proof file");
-    let bytes = fs::read("/home/user/Expander/gkr/test_bls_proof0_new").expect("Unable to read proof from file.");
+    // let bytes = fs::read("/home/user/Expander/gkr/test_bls_proof0_new").expect("Unable to read proof from file.");
     let (proof, claimed_v) = load_proof_and_claimed_v::<
                 <Cfg::FieldConfig as FieldEngine>::ChallengeField,
-            >(&bytes)
+            >(&proof_bytes)
             .expect("Unable to deserialize proof.");
 
     println!("verifying proof");
@@ -65,6 +65,8 @@ pub fn verify_bls<Cfg: GKREngine + 'static>() {
     } else {
         println!("verification failed");
     }
+
+    return result;
 }
 
 // fn verify_bls_in_different_server<Cfg: GKREngine + 'static>(proof_bytes_path: &str) {
